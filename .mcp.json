@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "frontier-orchestrator": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "${CLAUDE_PROJECT_DIR:-.}/dist/src/index.js"
+      ],
+      "env": {
+        "FRONTIER_PROJECT_ROOT": "${CLAUDE_PROJECT_DIR:-.}"
+      },
+      "timeout": 1800000
+    }
+  }
+}

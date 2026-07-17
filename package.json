@@ -1,0 +1,54 @@
+{
+  "name": "frontier-orchestrator-mcp",
+  "version": "0.1.0",
+  "description": "Multi-agent orchestration MCP server and skill for Claude Code: Claude stays lead engineer while delegating backend work to OpenAI Codex and frontend/design work to Kimi.",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "claude",
+    "claude-code",
+    "multi-agent",
+    "orchestration",
+    "ai-agents",
+    "codex",
+    "kimi",
+    "agentic-coding",
+    "developer-tools"
+  ],
+  "license": "MIT",
+  "author": "luckeyfaraday",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/luckeyfaraday/frontier-orchestrator.git"
+  },
+  "homepage": "https://github.com/luckeyfaraday/frontier-orchestrator#readme",
+  "bugs": {
+    "url": "https://github.com/luckeyfaraday/frontier-orchestrator/issues"
+  },
+  "type": "module",
+  "bin": {
+    "frontier-orchestrator": "dist/src/index.js"
+  },
+  "files": [
+    "dist",
+    ".claude/skills/orchestrate-specialists"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/src/index.js",
+    "test": "npm run build && node --test dist/test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Orchestrate Specialists"
+  short_description: "Route backend work to Codex and frontend work to Kimi."
+  default_prompt: "Use $orchestrate-specialists to split and coordinate this task between Codex backend and Kimi frontend specialists."

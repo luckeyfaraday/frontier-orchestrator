@@ -244,7 +244,7 @@ async function main(): Promise<void> {
     },
     {
       instructions:
-        "Claude is the lead integrator. Use delegate_backend for server/data/infrastructure work, delegate_frontend for design/UI/client work, and delegate_build for bounded cross-cutting implementation, migrations, refactors, build tooling, or debugging. Split mixed tasks at explicit contracts. Avoid concurrent implementation in overlapping files. Inspect and verify specialist changes before presenting completion.",
+        "Claude is the lead integrator. Route by ownership first: use delegate_backend for backend behavior and delegate_frontend for frontend or UX behavior. Use delegate_build only for domain-neutral build tooling, dependency or toolchain upgrades, CI and release automation, mechanical repository-wide transformations, generated boilerplate, test or lint cleanup, or when the user explicitly requests Grok. Never select Grok solely because it is faster. Split mixed tasks at explicit contracts, avoid concurrent implementation in overlapping files, and verify specialist changes before presenting completion.",
     },
   );
 
@@ -327,9 +327,9 @@ async function main(): Promise<void> {
   server.registerTool(
     "delegate_build",
     {
-      title: "Delegate general build work to Grok Build",
+      title: "Delegate tooling and maintenance work to Grok Build",
       description:
-        "Delegate bounded cross-cutting implementation, repository-wide refactors, migrations, debugging, build tooling, or broad test work to Grok Build. Use analyze/review for read-only work and implement for edits.",
+        "Delegate domain-neutral build tooling, dependency or toolchain upgrades, CI and release automation, mechanical repository-wide transformations, generated boilerplate, or test and lint cleanup to Grok Build. Backend behavior belongs to Codex and frontend or UX behavior belongs to Kimi unless the user explicitly overrides routing. Never choose Grok solely for speed. Use analyze/review for read-only work and implement for edits.",
       inputSchema: delegationInput,
       annotations: {
         readOnlyHint: false,

@@ -8,7 +8,7 @@
 
 - **Backend work** (APIs, databases, migrations, auth, infrastructure, security, backend tests) to **OpenAI Codex**
 - **Frontend and design work** (UI, UX, components, styling, accessibility, animation, client state) to **Kimi Code**
-- **General build work** (cross-cutting features, repository-wide refactors, migrations, debugging, tooling, broad test fixes) to **Grok Build**
+- **Tooling and mechanical maintenance** (build configuration, dependency upgrades, CI, release automation, generated boilerplate, repository transformations, test/lint cleanup) to **Grok Build**
 
 Each specialist runs as a sandboxed subprocess in your repository, receives a role-scoped brief with explicit file ownership and acceptance criteria, and reports back in a structured format that Claude reviews before anything reaches you.
 
@@ -16,7 +16,7 @@ Each specialist runs as a sandboxed subprocess in your repository, receives a ro
 
 Frontier coding agents have different strengths. Instead of asking one model to do everything, Frontier Orchestrator routes each part of a full-stack task to the agent best suited for it — with **enforced coordination discipline** so agents never trample each other's changes:
 
-- **Domain and workload routing** — backend-shaped work goes to Codex, design/frontend-shaped work goes to Kimi, bounded cross-cutting build work goes to Grok, and Claude keeps decomposition, contracts, integration, and final verification.
+- **Domain-first routing** — backend behavior goes to Codex, frontend and UX behavior goes to Kimi, and only domain-neutral tooling or mechanical maintenance goes to Grok unless you explicitly override routing. Grok is never selected solely because it is faster.
 - **Workspace mutation guard** — two specialists cannot edit overlapping directories at the same time unless Claude explicitly certifies their file scopes are disjoint.
 - **Contract-first sequencing** — for an unknown cross-stack interface, Codex analyzes the backend contract first; Kimi builds against the accepted contract. A frontend task can never silently invent a backend API.
 - **Read-only modes** — `analyze` and `review` delegations run the specialist CLI in a read-only sandbox; only `implement` may edit the workspace.
@@ -31,7 +31,7 @@ flowchart LR
     C -->|delegate_build| M
     M -->|codex exec<br/>sandboxed| X[OpenAI Codex<br/>backend specialist]
     M -->|kimi --print<br/>sandboxed| K[Kimi Code<br/>frontend specialist]
-    M -->|grok -p<br/>sandboxed| G[Grok Build<br/>general build specialist]
+    M -->|grok -p<br/>sandboxed| G[Grok Build<br/>tooling/maintenance specialist]
     X --> M
     K --> M
     G --> M
@@ -46,11 +46,11 @@ The MCP server exposes four tools:
 | `specialist_status` | Check that the Codex, Kimi, and Grok CLIs are installed and report versions |
 | `delegate_backend` | Send a bounded backend task to Codex (`analyze` / `review` / `implement`) |
 | `delegate_frontend` | Send a bounded design/frontend task to Kimi (`analyze` / `review` / `implement`) |
-| `delegate_build` | Send bounded cross-cutting build work to Grok Build (`analyze` / `review` / `implement`) |
+| `delegate_build` | Send domain-neutral tooling or mechanical maintenance to Grok Build (`analyze` / `review` / `implement`) |
 
 Each delegation takes a structured request — `task`, `mode`, `context`, `file_scope`, `acceptance_criteria`, optional `model` override, and a hard `timeout_seconds` — and returns JSON with the specialist's final message, exit code, duration, and diagnostics on failure.
 
-The companion **`orchestrate-specialists` skill** (in `.claude/skills/`) teaches Claude the routing rules, the backend-first and frontend-first sequencing patterns, when to use Grok for stable cross-cutting work, the parallelization preconditions, and the guardrails (see [routing-contract.md](.claude/skills/orchestrate-specialists/references/routing-contract.md)).
+The companion **`orchestrate-specialists` skill** (in `.claude/skills/`) teaches Claude the domain-first routing rules, backend-first and frontend-first sequencing patterns, Grok's tooling and maintenance boundary, parallelization preconditions, and guardrails (see [routing-contract.md](.claude/skills/orchestrate-specialists/references/routing-contract.md)).
 
 ## Quick start
 
@@ -100,7 +100,7 @@ A typical full-stack feature flows like this:
 1. Claude inspects the repo and writes acceptance criteria plus file scopes for each side.
 2. `delegate_backend` with `mode: analyze` — Codex proposes the API contract.
 3. Claude normalizes the contract and passes it to Kimi.
-4. `delegate_backend` and `delegate_frontend` with `mode: implement` — run sequentially, or in parallel only when file scopes are disjoint (`allow_concurrent_mutation: true`). For a large, stable cross-cutting slice, Claude can instead assign a bounded scope to `delegate_build`.
+4. `delegate_backend` and `delegate_frontend` with `mode: implement` — run sequentially, or in parallel only when file scopes are disjoint (`allow_concurrent_mutation: true`). Separate domain-neutral tooling or mechanical maintenance can go to `delegate_build`; a stable application contract does not transfer backend or frontend ownership to Grok.
 5. Claude inspects every changed file, runs the integrated checks, fixes small integration defects, and reports one unified result.
 
 ## Configuration
@@ -123,7 +123,7 @@ Implementation calls are serialized per working directory unless Claude explicit
 ## FAQ
 
 **What is Frontier Orchestrator?**
-A local stdio MCP server plus a Claude Code skill that lets Claude orchestrate OpenAI Codex, Kimi Code, and Grok Build as specialists — Codex for backend engineering, Kimi for design and frontend, and Grok for bounded cross-cutting build work — while Claude remains responsible for decomposition, contracts, review, and integration.
+A local stdio MCP server plus a Claude Code skill that lets Claude orchestrate OpenAI Codex, Kimi Code, and Grok Build as specialists — Codex for backend engineering, Kimi for design and frontend, and Grok for domain-neutral tooling and mechanical maintenance — while Claude remains responsible for decomposition, contracts, review, and integration.
 
 **How is this different from Claude Code subagents?**
 Subagents run more instances of Claude. Frontier Orchestrator routes work to *different frontier models* by domain and workload strength, wrapped in file-scope and mutation guardrails, with Claude reviewing everything before completion.

@@ -1,7 +1,7 @@
 import type { CommandInvocation } from "./process.js";
 
 export type DelegationMode = "analyze" | "implement" | "review";
-export type Specialist = "codex-backend" | "kimi-frontend";
+export type Specialist = "codex-backend" | "kimi-frontend" | "grok-builder";
 
 export interface DelegationRequest {
   task: string;
@@ -22,6 +22,14 @@ const ROLE_GUIDANCE: Record<Specialist, string> = {
 Do not redesign or broadly edit UI/frontend files. If the task requires a frontend change, describe the contract or follow-up needed for the frontend specialist.`,
   "kimi-frontend": `Own product design and frontend engineering: information architecture, interaction design, visual systems, components, client state, accessibility, responsiveness, animation, and frontend-focused tests.
 Do not redesign backend services or data models. If the task requires a backend change, describe the exact API or contract needed from the backend specialist.`,
+  "grok-builder": `Own bounded, general-purpose software delivery: cross-cutting features, repository-wide refactors, migrations, debugging, build tooling, and tests that do not fit cleanly within one domain specialist's ownership.
+Do not make unrequested product or architecture decisions. Preserve explicit backend and frontend contracts, stay within the declared file scope, and surface material ambiguity to Claude.`,
+};
+
+const SPECIALIST_LABELS: Record<Specialist, string> = {
+  "codex-backend": "backend",
+  "kimi-frontend": "design/frontend",
+  "grok-builder": "general build",
 };
 
 function renderList(items: string[] | undefined, emptyValue: string): string {
@@ -44,8 +52,8 @@ export function buildSpecialistPrompt(
         ? "Review the current implementation without modifying files."
         : "Analyze the request and produce an implementation-ready plan without modifying files.";
 
-  return `You are the ${specialist === "codex-backend" ? "backend" : "design/frontend"} specialist in a multi-agent workflow led by Claude Code.
-Claude is the lead integrator and will inspect your work, coordinate the other specialist, and make the final decision.
+  return `You are the ${SPECIALIST_LABELS[specialist]} specialist in a multi-agent workflow led by Claude Code.
+Claude is the lead integrator and will inspect your work, coordinate the other specialists, and make the final decision.
 
 ## Ownership
 
@@ -80,7 +88,7 @@ ${request.context?.trim() || "No additional context was supplied."}
 - Inspect relevant existing code and conventions before deciding.
 - Treat the file scope as an ownership boundary. Do not touch files outside it unless essential; report any exception explicitly.
 - Preserve unrelated user changes and avoid destructive version-control operations.
-- Keep interface changes explicit so Claude can hand them to the other specialist.
+- Keep interface changes explicit so Claude can hand them to the other specialists.
 - Run focused checks when the mode permits it. Do not claim checks passed unless you ran them.
 - Keep the final response concise and use exactly these headings:
   - Summary
@@ -145,5 +153,39 @@ export function buildKimiInvocation(
     args,
     cwd: options.workingDirectory,
     stdin: buildSpecialistPrompt("kimi-frontend", request, options.workingDirectory),
+  };
+}
+
+export function buildGrokInvocation(
+  request: DelegationRequest,
+  options: InvocationOptions,
+): CommandInvocation {
+  const args = [
+    "-p",
+    buildSpecialistPrompt("grok-builder", request, options.workingDirectory),
+    "--cwd",
+    options.workingDirectory,
+    "--output-format",
+    "plain",
+    "--permission-mode",
+    request.mode === "implement" ? "bypassPermissions" : "plan",
+    "--sandbox",
+    request.mode === "implement" ? "workspace" : "read-only",
+    "--no-memory",
+    "--no-subagents",
+  ];
+
+  if (request.mode !== "implement") {
+    args.push("--tools", "read_file,grep,list_dir");
+  }
+
+  if (request.model !== undefined) {
+    args.push("--model", request.model);
+  }
+
+  return {
+    command: options.cli,
+    args,
+    cwd: options.workingDirectory,
   };
 }

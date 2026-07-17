@@ -30,3 +30,13 @@ test("resolveWorkingDirectory resolves symlinks before containment checks", asyn
 
   await assert.rejects(resolveWorkingDirectory("escape", config), /outside the allowed roots/);
 });
+
+test("loadRuntimeConfig supports a Grok CLI override", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "frontier-config-"));
+  const config = await loadRuntimeConfig(
+    { FRONTIER_PROJECT_ROOT: root, FRONTIER_GROK_CLI: "/opt/grok-custom" },
+    root,
+  );
+
+  assert.equal(config.grokCli, "/opt/grok-custom");
+});

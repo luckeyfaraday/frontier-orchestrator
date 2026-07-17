@@ -1,7 +1,7 @@
 {
   "name": "frontier-orchestrator-mcp",
   "version": "0.1.0",
-  "description": "Multi-agent orchestration MCP server and skill for Claude Code: Claude stays lead engineer while delegating backend work to OpenAI Codex and frontend/design work to Kimi.",
+  "description": "Multi-agent orchestration MCP server and skill for Claude Code: delegate to OpenAI Codex, Kimi, and Grok Build while Claude stays lead engineer.",
   "keywords": [
     "mcp",
     "mcp-server",
@@ -13,6 +13,8 @@
     "ai-agents",
     "codex",
     "kimi",
+    "grok",
+    "xai",
     "agentic-coding",
     "developer-tools"
   ],

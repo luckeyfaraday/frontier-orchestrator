@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildCodexInvocation,
+  buildGrokInvocation,
   buildKimiInvocation,
   buildSpecialistPrompt,
   type DelegationRequest,
@@ -63,4 +64,30 @@ test("specialist prompt includes explicit scope and acceptance criteria", () => 
   assert.match(prompt, /- server\//);
   assert.match(prompt, /Return 200 for an authenticated user/);
   assert.match(prompt, /Do not redesign or broadly edit UI\/frontend files/);
+});
+
+test("Grok implementation uses a workspace sandbox and isolated headless session", () => {
+  const invocation = buildGrokInvocation(request, {
+    cli: "grok-custom",
+    workingDirectory: "/workspace",
+  });
+
+  assert.equal(invocation.command, "grok-custom");
+  assert.ok(invocation.args.includes("workspace"));
+  assert.ok(invocation.args.includes("bypassPermissions"));
+  assert.ok(invocation.args.includes("--no-memory"));
+  assert.ok(invocation.args.includes("--no-subagents"));
+  assert.match(invocation.args[1] ?? "", /general build specialist/);
+});
+
+test("Grok analysis restricts the agent to read-only tools", () => {
+  const invocation = buildGrokInvocation(
+    { ...request, mode: "analyze", model: "available-grok-model" },
+    { cli: "grok", workingDirectory: "/workspace" },
+  );
+
+  assert.ok(invocation.args.includes("read-only"));
+  assert.ok(invocation.args.includes("plan"));
+  assert.ok(invocation.args.includes("read_file,grep,list_dir"));
+  assert.deepEqual(invocation.args.slice(-2), ["--model", "available-grok-model"]);
 });

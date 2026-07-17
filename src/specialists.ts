@@ -22,14 +22,14 @@ const ROLE_GUIDANCE: Record<Specialist, string> = {
 Do not redesign or broadly edit UI/frontend files. If the task requires a frontend change, describe the contract or follow-up needed for the frontend specialist.`,
   "kimi-frontend": `Own product design and frontend engineering: information architecture, interaction design, visual systems, components, client state, accessibility, responsiveness, animation, and frontend-focused tests.
 Do not redesign backend services or data models. If the task requires a backend change, describe the exact API or contract needed from the backend specialist.`,
-  "grok-builder": `Own bounded, general-purpose software delivery: cross-cutting features, repository-wide refactors, migrations, debugging, build tooling, and tests that do not fit cleanly within one domain specialist's ownership.
-Do not make unrequested product or architecture decisions. Preserve explicit backend and frontend contracts, stay within the declared file scope, and surface material ambiguity to Claude.`,
+  "grok-builder": `Own domain-neutral codebase maintenance and developer tooling: build configuration, dependency and toolchain upgrades, CI and release automation, mechanical repository-wide transformations, generated boilerplate, and test or lint cleanup.
+Do not implement or change backend application behavior, APIs, data, auth, security, frontend product behavior, UX, or visual design unless Claude explicitly says the user overrode normal routing. Those areas belong to Codex or Kimi even when the change looks simple. Never accept a task solely because Grok is faster.`,
 };
 
 const SPECIALIST_LABELS: Record<Specialist, string> = {
   "codex-backend": "backend",
   "kimi-frontend": "design/frontend",
-  "grok-builder": "general build",
+  "grok-builder": "tooling/maintenance",
 };
 
 function renderList(items: string[] | undefined, emptyValue: string): string {

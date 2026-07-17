@@ -66,7 +66,7 @@ test("specialist prompt includes explicit scope and acceptance criteria", () => 
   assert.match(prompt, /Do not redesign or broadly edit UI\/frontend files/);
 });
 
-test("Grok implementation uses a workspace sandbox and isolated headless session", () => {
+test("Grok implementation uses a workspace sandbox and a domain-neutral prompt", () => {
   const invocation = buildGrokInvocation(request, {
     cli: "grok-custom",
     workingDirectory: "/workspace",
@@ -77,7 +77,10 @@ test("Grok implementation uses a workspace sandbox and isolated headless session
   assert.ok(invocation.args.includes("bypassPermissions"));
   assert.ok(invocation.args.includes("--no-memory"));
   assert.ok(invocation.args.includes("--no-subagents"));
-  assert.match(invocation.args[1] ?? "", /general build specialist/);
+  assert.match(invocation.args[1] ?? "", /tooling\/maintenance specialist/);
+  assert.match(invocation.args[1] ?? "", /domain-neutral codebase maintenance/);
+  assert.match(invocation.args[1] ?? "", /Those areas belong to Codex or Kimi/);
+  assert.match(invocation.args[1] ?? "", /Never accept a task solely because Grok is faster/);
 });
 
 test("Grok analysis restricts the agent to read-only tools", () => {

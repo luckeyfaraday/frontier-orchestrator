@@ -6,6 +6,7 @@ export interface RuntimeConfig {
   allowedRoots: string[];
   codexCli: string;
   kimiCli: string;
+  grokCli: string;
   maxConcurrency: number;
   maxCapturedBytes: number;
   maxResultChars: number;
@@ -66,6 +67,7 @@ export async function loadRuntimeConfig(
     allowedRoots: [...allowedRoots],
     codexCli: env.FRONTIER_CODEX_CLI ?? "codex",
     kimiCli: env.FRONTIER_KIMI_CLI ?? "kimi",
+    grokCli: env.FRONTIER_GROK_CLI ?? "grok",
     maxConcurrency: positiveInteger(env.FRONTIER_MAX_CONCURRENCY, 2, 8),
     maxCapturedBytes: positiveInteger(env.FRONTIER_MAX_CAPTURED_BYTES, 2_000_000, 20_000_000),
     maxResultChars: positiveInteger(env.FRONTIER_MAX_RESULT_CHARS, 30_000, 100_000),

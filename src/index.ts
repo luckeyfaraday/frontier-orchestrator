@@ -8,6 +8,7 @@ import { loadRuntimeConfig, resolveWorkingDirectory, type RuntimeConfig } from "
 import { SpecialistCoordinator } from "./coordinator.js";
 import {
   buildCodexInvocation,
+  buildGrokInvocation,
   buildKimiInvocation,
   type DelegationMode,
   type DelegationRequest,
@@ -148,9 +149,14 @@ function failureHint(specialist: Specialist, stdout: string, stderr: string): st
   }
 
   if (/not logged in|authentication|unauthorized|401/i.test(combined)) {
-    return specialist === "codex-backend"
-      ? "Codex authentication may be missing or expired. Run `codex login status` and sign in if needed."
-      : "Kimi authentication may be missing or expired. Run `kimi login` and retry.";
+    switch (specialist) {
+      case "codex-backend":
+        return "Codex authentication may be missing or expired. Run `codex login status` and sign in if needed.";
+      case "kimi-frontend":
+        return "Kimi authentication may be missing or expired. Run `kimi login` and retry.";
+      case "grok-builder":
+        return "Grok authentication may be missing or expired. Run `grok login` and retry.";
+    }
   }
 
   return undefined;
@@ -165,16 +171,25 @@ async function delegate(
   try {
     const workingDirectory = await resolveWorkingDirectory(args.working_directory, config);
     const request = buildRequest(args);
-    const invocation =
-      specialist === "codex-backend"
-        ? buildCodexInvocation(request, {
+    const invocation = (() => {
+      switch (specialist) {
+        case "codex-backend":
+          return buildCodexInvocation(request, {
             cli: config.codexCli,
             workingDirectory,
-          })
-        : buildKimiInvocation(request, {
+          });
+        case "kimi-frontend":
+          return buildKimiInvocation(request, {
             cli: config.kimiCli,
             workingDirectory,
           });
+        case "grok-builder":
+          return buildGrokInvocation(request, {
+            cli: config.grokCli,
+            workingDirectory,
+          });
+      }
+    })();
 
     const result = await coordinator.run(
       invocation,
@@ -229,7 +244,7 @@ async function main(): Promise<void> {
     },
     {
       instructions:
-        "Claude is the lead integrator. Use delegate_backend for server/data/infrastructure work and delegate_frontend for design/UI/client work. Split mixed tasks at explicit contracts. Avoid concurrent implementation in overlapping files. Inspect and verify specialist changes before presenting completion.",
+        "Claude is the lead integrator. Use delegate_backend for server/data/infrastructure work, delegate_frontend for design/UI/client work, and delegate_build for bounded cross-cutting implementation, migrations, refactors, build tooling, or debugging. Split mixed tasks at explicit contracts. Avoid concurrent implementation in overlapping files. Inspect and verify specialist changes before presenting completion.",
     },
   );
 
@@ -238,7 +253,7 @@ async function main(): Promise<void> {
     {
       title: "Check specialist availability",
       description:
-        "Check whether the configured Codex and Kimi CLIs are available. This does not verify account authentication.",
+        "Check whether the configured Codex, Kimi, and Grok CLIs are available. This does not verify account authentication.",
       inputSchema: {},
       annotations: {
         readOnlyHint: true,
@@ -247,9 +262,10 @@ async function main(): Promise<void> {
       },
     },
     async () => {
-      const [codex, kimi] = await Promise.all([
+      const [codex, kimi, grok] = await Promise.all([
         commandVersion(config.codexCli),
         commandVersion(config.kimiCli),
+        commandVersion(config.grokCli),
       ]);
 
       return {
@@ -263,6 +279,7 @@ async function main(): Promise<void> {
                 max_concurrency: config.maxConcurrency,
                 codex,
                 kimi,
+                grok,
               },
               null,
               2,
@@ -305,6 +322,23 @@ async function main(): Promise<void> {
     },
     async (args) =>
       await delegate("kimi-frontend", args as DelegateArguments, config, coordinator),
+  );
+
+  server.registerTool(
+    "delegate_build",
+    {
+      title: "Delegate general build work to Grok Build",
+      description:
+        "Delegate bounded cross-cutting implementation, repository-wide refactors, migrations, debugging, build tooling, or broad test work to Grok Build. Use analyze/review for read-only work and implement for edits.",
+      inputSchema: delegationInput,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+      },
+    },
+    async (args) =>
+      await delegate("grok-builder", args as DelegateArguments, config, coordinator),
   );
 
   const transport = new StdioServerTransport();

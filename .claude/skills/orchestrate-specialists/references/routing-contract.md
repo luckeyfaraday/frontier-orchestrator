@@ -9,6 +9,8 @@
 | Infrastructure, jobs, queues, observability | Codex | Runtime/configuration impact and failure modes |
 | Page structure, user flows, visual hierarchy | Kimi | Interaction states, component boundaries, responsive behavior |
 | Components, CSS, client state, accessibility | Kimi | Backend data assumptions and frontend verification |
+| Cross-cutting implementation with stable contracts | Grok Build | Files changed, preserved contracts, integrated verification |
+| Repository-wide refactors, migrations, build tooling | Grok Build | Compatibility impact, migration notes, checks run |
 | Shared types or generated clients | Claude decides owner | Source of truth, generation command, compatibility impact |
 | End-to-end behavior | Claude | Integrated acceptance result |
 
@@ -33,9 +35,11 @@ Use parallel implementation only when all conditions are true:
 
 - the contract is already accepted;
 - owned file scopes are disjoint;
-- neither task generates files owned by the other;
-- both specialists can verify their part independently;
+- no task generates files owned by another specialist;
+- every specialist can verify its part independently;
 - Claude will perform integration checks afterward.
+
+Use Grok Build only after the relevant backend, frontend, and shared contracts are explicit. Give it a bounded file scope and acceptance criteria; keep unresolved product behavior and architecture decisions with Claude or the appropriate domain specialist.
 
 ## Handoff checklist
 
@@ -55,6 +59,6 @@ When specialists disagree:
 
 1. Prefer repository constraints and user requirements over either specialist's preference.
 2. Prefer the smallest stable interface that satisfies current acceptance criteria.
-3. Keep product/interaction authority with Kimi and server/data authority with Codex.
+3. Keep product/interaction authority with Kimi, server/data authority with Codex, and bounded cross-cutting execution with Grok Build.
 4. Keep final architectural and integration authority with Claude.
 5. Delegate a narrow read-only review if evidence is insufficient; do not bounce the full task back and forth.

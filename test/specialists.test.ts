@@ -38,24 +38,44 @@ test("Codex analysis uses a read-only sandbox", () => {
   assert.ok(invocation.args.includes("read-only"));
 });
 
-test("Kimi review starts in plan mode and receives the prompt through stdin", () => {
+test("Kimi review runs read-only via a restricted agent-file", () => {
   const invocation = buildKimiInvocation(
     { ...request, mode: "review" },
     { cli: "kimi", workingDirectory: "/workspace" },
   );
 
-  assert.ok(invocation.args.includes("--plan"));
-  assert.ok(!invocation.args.includes("--prompt"));
-  assert.match(invocation.stdin ?? "", /design\/frontend specialist/);
+  assert.ok(invocation.args.includes("--prompt"));
+  assert.equal(invocation.args[invocation.args.indexOf("--output-format") + 1], "text");
+  // Kimi 2.x rejects --auto / --yolo / --plan with --prompt; read-only is
+  // enforced by a restricted agent-file instead.
+  assert.ok(!invocation.args.includes("--plan"));
+  assert.ok(!invocation.args.includes("--auto"));
+  assert.ok(!invocation.args.includes("--yolo"));
+  assert.ok(invocation.args.includes("--agent-file"));
+  const agentFile = invocation.args[invocation.args.indexOf("--agent-file") + 1] ?? "";
+  assert.match(agentFile, /kimi-readonly\.md$/);
+  assert.equal(invocation.stdin, undefined);
+  const promptArg = invocation.args[invocation.args.indexOf("--prompt") + 1] ?? "";
+  assert.match(promptArg, /design\/frontend specialist/);
 });
 
-test("Kimi implementation does not force plan mode", () => {
+test("Kimi implementation runs unrestricted (no read-only agent-file)", () => {
   const invocation = buildKimiInvocation(request, {
     cli: "kimi",
     workingDirectory: "/workspace",
   });
 
+  assert.ok(!invocation.args.includes("--agent-file"));
   assert.ok(!invocation.args.includes("--plan"));
+});
+
+test("Kimi passes a model override through", () => {
+  const invocation = buildKimiInvocation(
+    { ...request, model: "kimi-k2" },
+    { cli: "kimi", workingDirectory: "/workspace" },
+  );
+
+  assert.deepEqual(invocation.args.slice(-2), ["--model", "kimi-k2"]);
 });
 
 test("specialist prompt includes explicit scope and acceptance criteria", () => {

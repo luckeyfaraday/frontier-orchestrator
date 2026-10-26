@@ -1,4 +1,10 @@
+import { fileURLToPath } from "node:url";
 import type { CommandInvocation } from "./process.js";
+
+// Restricted read-only agent used for Kimi analyze/review (see buildKimiInvocation).
+const KIMI_READONLY_AGENT_FILE =
+  process.env.FRONTIER_KIMI_READONLY_AGENT ??
+  fileURLToPath(new URL("../../agents/kimi-readonly.md", import.meta.url));
 
 export type DelegationMode = "analyze" | "implement" | "review";
 export type Specialist = "codex-backend" | "kimi-frontend" | "grok-builder";
@@ -133,15 +139,23 @@ export function buildKimiInvocation(
   request: DelegationRequest,
   options: InvocationOptions,
 ): CommandInvocation {
+  // Kimi Code 2.x headless (`--prompt`) runs under the `auto` permission policy:
+  // it executes tools and edits files with no interactive approval. The mode
+  // flags (--auto / --yolo / --plan) cannot be combined with --prompt, so
+  // read-only analyze/review is enforced by selecting a restricted agent whose
+  // tool allowlist excludes every write/edit/command tool (agents/kimi-readonly.md);
+  // implement runs unrestricted. The prompt is passed via --prompt (not stdin)
+  // and the workspace is the process cwd. The older
+  // --work-dir / --print / --final-message-only flags were removed upstream.
   const args = [
-    "--work-dir",
-    options.workingDirectory,
-    "--print",
-    "--final-message-only",
+    "--prompt",
+    buildSpecialistPrompt("kimi-frontend", request, options.workingDirectory),
+    "--output-format",
+    "text",
   ];
 
   if (request.mode !== "implement") {
-    args.push("--plan");
+    args.push("--agent-file", KIMI_READONLY_AGENT_FILE);
   }
 
   if (request.model !== undefined) {
@@ -152,7 +166,6 @@ export function buildKimiInvocation(
     command: options.cli,
     args,
     cwd: options.workingDirectory,
-    stdin: buildSpecialistPrompt("kimi-frontend", request, options.workingDirectory),
   };
 }
 

@@ -40,3 +40,19 @@ test("loadRuntimeConfig supports a Grok CLI override", async () => {
 
   assert.equal(config.grokCli, "/opt/grok-custom");
 });
+
+test("loadRuntimeConfig reads the idle timeout and allows disabling it", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "frontier-config-"));
+  const load = async (value?: string) =>
+    (await loadRuntimeConfig(
+      value === undefined
+        ? { FRONTIER_PROJECT_ROOT: root }
+        : { FRONTIER_PROJECT_ROOT: root, FRONTIER_IDLE_TIMEOUT_SECONDS: value },
+      root,
+    )).idleTimeoutSeconds;
+
+  assert.equal(await load(), 900);
+  assert.equal(await load("0"), 0);
+  assert.equal(await load("120"), 120);
+  assert.equal(await load("not-a-number"), 900);
+});

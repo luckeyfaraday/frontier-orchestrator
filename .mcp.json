@@ -9,7 +9,7 @@
       "env": {
         "FRONTIER_PROJECT_ROOT": "${CLAUDE_PROJECT_DIR:-.}"
       },
-      "timeout": 1800000
+      "timeout": 7500000
     }
   }
 }

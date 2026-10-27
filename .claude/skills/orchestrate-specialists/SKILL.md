@@ -76,6 +76,13 @@ Supply:
 
 Use `mode: analyze` for planning and contract discovery, `mode: review` for read-only critique, and `mode: implement` for edits.
 
+## Timeouts
+
+- Leave `timeout_seconds` at its default (3600). Raise it toward 7200 for large implementations; never shorten it to fit a time budget.
+- Split work by ownership, contracts, and file scope, not by expected duration. Codex and Kimi are slow on large tasks, and that is expected.
+- The server stops Codex and Kimi when they produce no output for its idle limit, so a long timeout does not waste time on a stuck run.
+- After `timed_out` or `idle_timed_out`, edits made before the stop remain in the workspace. Inspect them and the final progress report, then delegate only the remaining work with a larger timeout instead of restarting or slicing the task further.
+
 ## Guardrails
 
 - Never delegate the whole ambiguous user request unchanged.

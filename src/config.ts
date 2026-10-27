@@ -10,6 +10,8 @@ export interface RuntimeConfig {
   maxConcurrency: number;
   maxCapturedBytes: number;
   maxResultChars: number;
+  /** 0 disables idle detection. */
+  idleTimeoutSeconds: number;
 }
 
 function positiveInteger(value: string | undefined, fallback: number, maximum: number): number {
@@ -71,6 +73,10 @@ export async function loadRuntimeConfig(
     maxConcurrency: positiveInteger(env.FRONTIER_MAX_CONCURRENCY, 2, 8),
     maxCapturedBytes: positiveInteger(env.FRONTIER_MAX_CAPTURED_BYTES, 2_000_000, 20_000_000),
     maxResultChars: positiveInteger(env.FRONTIER_MAX_RESULT_CHARS, 30_000, 100_000),
+    idleTimeoutSeconds:
+      env.FRONTIER_IDLE_TIMEOUT_SECONDS?.trim() === "0"
+        ? 0
+        : positiveInteger(env.FRONTIER_IDLE_TIMEOUT_SECONDS, 900, 7_200),
   };
 }
 

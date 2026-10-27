@@ -30,7 +30,7 @@ flowchart LR
     C -->|delegate_frontend| M
     C -->|delegate_build| M
     M -->|codex exec<br/>sandboxed| X[OpenAI Codex<br/>backend specialist]
-    M -->|kimi --print<br/>sandboxed| K[Kimi Code<br/>frontend specialist]
+    M -->|kimi -p<br/>sandboxed| K[Kimi Code<br/>frontend specialist]
     M -->|grok -p<br/>sandboxed| G[Grok Build<br/>tooling/maintenance specialist]
     X --> M
     K --> M
@@ -48,13 +48,15 @@ The MCP server exposes four tools:
 | `delegate_frontend` | Send a bounded design/frontend task to Kimi (`analyze` / `review` / `implement`) |
 | `delegate_build` | Send domain-neutral tooling or mechanical maintenance to Grok Build (`analyze` / `review` / `implement`) |
 
-Each delegation takes a structured request — `task`, `mode`, `context`, `file_scope`, `acceptance_criteria`, optional `model` override, and a hard `timeout_seconds` — and returns JSON with the specialist's final message, exit code, duration, and diagnostics on failure.
+Each delegation takes a structured request — `task`, `mode`, `context`, `file_scope`, `acceptance_criteria`, optional `model` override, and a hard `timeout_seconds` (default 3600, max 7200) — and returns JSON with the specialist's final message, exit code, duration, and diagnostics on failure.
 
 The companion **`orchestrate-specialists` skill** (in `.claude/skills/`) teaches Claude the domain-first routing rules, backend-first and frontend-first sequencing patterns, Grok's tooling and maintenance boundary, parallelization preconditions, and guardrails (see [routing-contract.md](.claude/skills/orchestrate-specialists/references/routing-contract.md)).
 
 ## Quick start
 
 Requirements: Node.js 20+, [Claude Code](https://claude.com/claude-code), and authenticated `codex`, `kimi`, and `grok` CLIs for the specialists you intend to use. A missing optional CLI only makes that specialist unavailable.
+
+Kimi requires [Kimi Code](https://moonshotai.github.io/kimi-code/) 2.x (`npm install -g @moonshot-ai/kimi-code`). The legacy Python `kimi-cli` flags (`--print`, `--work-dir`, `--final-message-only`) are no longer used; run `kimi migrate` to move existing kimi-cli data into Kimi Code.
 
 ```bash
 git clone https://github.com/luckeyfaraday/frontier-orchestrator.git
@@ -91,6 +93,8 @@ mkdir -p ~/.claude/skills
 cp -R .claude/skills/orchestrate-specialists ~/.claude/skills/
 ```
 
+`claude mcp add` does not set a tool-call timeout. Add `"timeout": 7500000` to the `frontier-orchestrator` entry under `mcpServers` in `~/.claude.json`, matching the project `.mcp.json`; otherwise slow specialists such as Codex at high reasoning effort can be cut off by the client before their own `timeout_seconds` expires.
+
 Restart Claude Code after changing MCP configuration.
 
 ## Example delegation
@@ -112,11 +116,16 @@ The server inherits existing Codex, Kimi, and Grok authentication from their CLI
 | `FRONTIER_PROJECT_ROOT` | `CLAUDE_PROJECT_DIR` | Base workspace for relative paths |
 | `FRONTIER_ALLOWED_ROOTS` | project root | Additional allowed roots, separated by the platform path delimiter |
 | `FRONTIER_CODEX_CLI` | `codex` | Codex executable or absolute path |
-| `FRONTIER_KIMI_CLI` | `kimi` | Kimi executable or absolute path |
+| `FRONTIER_KIMI_CLI` | `kimi` | Kimi Code executable or absolute path |
 | `FRONTIER_GROK_CLI` | `grok` | Grok executable or absolute path |
 | `FRONTIER_MAX_CONCURRENCY` | `2` | Maximum simultaneous specialist processes |
 | `FRONTIER_MAX_CAPTURED_BYTES` | `2000000` | Per-stream child output retained in memory |
 | `FRONTIER_MAX_RESULT_CHARS` | `30000` | Maximum specialist text returned to Claude |
+| `FRONTIER_IDLE_TIMEOUT_SECONDS` | `900` | Stop Codex or Kimi after this many seconds without any output; `0` disables. Grok's plain output arrives only at the end, so it is exempt |
+
+Keep the MCP client `timeout` (milliseconds) above the 7200-second `timeout_seconds` maximum so the server, not the client, ends an overrunning specialist and returns its partial output. If the client cancels a request anyway, the server terminates the specialist process and releases its workspace lock.
+
+`timeout_seconds` is a ceiling, not a budget. Stuck Codex and Kimi runs are caught by the idle limit instead, so delegations should keep the default rather than shortening it or splitting work by time. When a run does hit a limit, the result includes `timed_out` or `idle_timed_out` and a hint to inspect the partial work and delegate only what remains.
 
 Implementation calls are serialized per working directory unless Claude explicitly sets `allow_concurrent_mutation: true`. The skill only permits that when file scopes are disjoint and the cross-stack contract is stable.
 
@@ -142,6 +151,7 @@ Yes, up to `FRONTIER_MAX_CONCURRENCY` processes — but workspace mutations are 
 - `LLM not set` from Kimi means no provider/model is configured. Run `kimi login`, complete the browser authorization and model selection, then retry.
 - Authentication errors from Grok mean its CLI session is unavailable or expired. Run `grok login`, then confirm the account's available models with `grok models`.
 - A project-scoped MCP server appears as pending until you open Claude Code in the repository and approve `.mcp.json`.
+- On Windows, npm installs CLIs as `.cmd` shims, which Node cannot spawn without a shell. The server resolves npm shims on `PATH` to their JavaScript entry and runs it with the current Node. A `FRONTIER_*_CLI` value may also point directly at a native `.exe` or a `.js`/`.mjs`/`.cjs` entry. Timeouts and cancellations terminate the whole specialist process tree.
 - `specialist_status` checks executable availability and versions; a real delegation is the definitive authentication/configuration check.
 
 ## Development

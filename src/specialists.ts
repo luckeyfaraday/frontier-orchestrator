@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { CommandInvocation } from "./process.js";
 
 export type DelegationMode = "analyze" | "implement" | "review";
@@ -12,10 +13,42 @@ export interface DelegationRequest {
   model?: string;
 }
 
+export interface SpecialistInvocation extends CommandInvocation {
+  /** Files the caller must write (UTF-8) before spawning. Paths are absolute. */
+  files?: Array<{ path: string; content: string }>;
+  /** Converts raw stdout into the final message. Returns undefined when no final message exists. */
+  extractFinalMessage?: (stdout: string) => string | undefined;
+  /** True when the CLI writes output while it works, so prolonged silence means it is stuck. */
+  reportsProgress?: boolean;
+}
+
 interface InvocationOptions {
   cli: string;
   workingDirectory: string;
 }
+
+export interface KimiInvocationOptions {
+  cli: string;
+  workingDirectory: string;
+  /** Existing empty temp directory owned and deleted by the caller. */
+  scratchDirectory: string;
+}
+
+export const KIMI_MAX_INLINE_PROMPT_CHARS = 24_000;
+
+const KIMI_READONLY_AGENT = `---
+name: frontier-readonly
+description: Read-only reviewer used by frontier-orchestrator analyze/review mode
+tools: [Read, ReadMediaFile, Grep, Glob]
+disallowedTools: [Bash, Write, Edit, FetchURL, Agent, AgentSwarm]
+subagents: []
+---
+
+\${base_prompt}
+
+You are running in READ-ONLY mode. You cannot modify files or run commands; only inspect the workspace.
+Your last message is the entire handoff to the caller, so make it complete and self-contained.
+`;
 
 const ROLE_GUIDANCE: Record<Specialist, string> = {
   "codex-backend": `Own backend engineering: server code, APIs, databases, auth, data flows, infrastructure, security, performance, and backend-focused tests.
@@ -102,7 +135,7 @@ ${request.context?.trim() || "No additional context was supplied."}
 export function buildCodexInvocation(
   request: DelegationRequest,
   options: InvocationOptions,
-): CommandInvocation {
+): SpecialistInvocation {
   const args = [
     "exec",
     "--ephemeral",
@@ -126,34 +159,99 @@ export function buildCodexInvocation(
     args,
     cwd: options.workingDirectory,
     stdin: buildSpecialistPrompt("codex-backend", request, options.workingDirectory),
+    // codex exec streams its transcript (messages, commands, results) to stderr.
+    reportsProgress: true,
   };
 }
 
 export function buildKimiInvocation(
   request: DelegationRequest,
-  options: InvocationOptions,
-): CommandInvocation {
-  const args = [
-    "--work-dir",
-    options.workingDirectory,
-    "--print",
-    "--final-message-only",
-  ];
+  options: KimiInvocationOptions,
+): SpecialistInvocation {
+  let prompt = buildSpecialistPrompt("kimi-frontend", request, options.workingDirectory);
+  const escapedLength = prompt.length + (prompt.match(/["\\]/g)?.length ?? 0);
+  const files: NonNullable<SpecialistInvocation["files"]> = [];
+  const args = ["--output-format", "stream-json"];
+
+  if (escapedLength > KIMI_MAX_INLINE_PROMPT_CHARS) {
+    const taskPath = path.join(options.scratchDirectory, "task.md");
+    files.push({ path: taskPath, content: prompt });
+    prompt = `Your complete task instructions are in the file ${taskPath}. Read that whole file with the Read tool first, then follow those instructions exactly.`;
+    args.push("--add-dir", options.scratchDirectory);
+  }
+
+  args.push("-p", prompt);
 
   if (request.mode !== "implement") {
-    args.push("--plan");
+    const agentPath = path.join(options.scratchDirectory, "frontier-readonly.md");
+    files.push({ path: agentPath, content: KIMI_READONLY_AGENT });
+    args.push("--agent-file", agentPath);
   }
 
   if (request.model !== undefined) {
-    args.push("--model", request.model);
+    args.push("-m", request.model);
   }
 
   return {
     command: options.cli,
     args,
     cwd: options.workingDirectory,
-    stdin: buildSpecialistPrompt("kimi-frontend", request, options.workingDirectory),
+    ...(files.length > 0 ? { files } : {}),
+    extractFinalMessage: extractKimiFinalMessage,
+    // stream-json emits one line per message and tool result.
+    reportsProgress: true,
   };
+}
+
+export function extractKimiFinalMessage(stdout: string): string | undefined {
+  let finalMessage: string | undefined;
+
+  for (const line of stdout.split(/\r?\n/)) {
+    if (line.trim().length === 0) {
+      continue;
+    }
+
+    let message: unknown;
+    try {
+      message = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    if (
+      typeof message !== "object" ||
+      message === null ||
+      !("role" in message) ||
+      message.role !== "assistant" ||
+      !("content" in message)
+    ) {
+      continue;
+    }
+
+    const content = message.content;
+    const text = typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content
+          .filter(
+            (part: unknown): part is { type: "text"; text: string } =>
+              typeof part === "object" &&
+              part !== null &&
+              "type" in part &&
+              part.type === "text" &&
+              "text" in part &&
+              typeof part.text === "string",
+          )
+          .map((part) => part.text)
+          .join("")
+        : "";
+
+    if (text.trim().length > 0) {
+      finalMessage = text.trimEnd();
+    }
+  }
+
+  return finalMessage;
 }
 
 export function buildGrokInvocation(

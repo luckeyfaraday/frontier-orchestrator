@@ -83,6 +83,15 @@ export class WorkspaceMutationGuard {
   }
 }
 
+export interface SpecialistRunOptions {
+  timeoutSeconds: number;
+  /** Omit to disable idle detection. */
+  idleTimeoutSeconds?: number;
+  mutatesWorkspace: boolean;
+  allowConcurrentMutation: boolean;
+  signal?: AbortSignal;
+}
+
 export class SpecialistCoordinator {
   private readonly concurrency: ConcurrencyGate;
   private readonly mutations = new WorkspaceMutationGuard();
@@ -92,24 +101,28 @@ export class SpecialistCoordinator {
     this.concurrency = new ConcurrencyGate(config.maxConcurrency);
   }
 
-  async run(
-    invocation: CommandInvocation,
-    timeoutSeconds: number,
-    mutatesWorkspace: boolean,
-    allowConcurrentMutation: boolean,
-  ): Promise<CommandResult> {
+  async run(invocation: CommandInvocation, options: SpecialistRunOptions): Promise<CommandResult> {
+    const { signal } = options;
     const releaseConcurrency = await this.concurrency.acquire();
     let releaseMutation: (() => void) | undefined;
 
     try {
-      if (mutatesWorkspace) {
-        releaseMutation = this.mutations.acquire(invocation.cwd, allowConcurrentMutation);
+      if (signal?.aborted === true) {
+        throw new Error("Delegation was cancelled by the MCP client before the specialist started.");
+      }
+
+      if (options.mutatesWorkspace) {
+        releaseMutation = this.mutations.acquire(invocation.cwd, options.allowConcurrentMutation);
       }
 
       return await runCommand(invocation, {
-        timeoutMs: timeoutSeconds * 1_000,
+        timeoutMs: options.timeoutSeconds * 1_000,
+        ...(options.idleTimeoutSeconds === undefined
+          ? {}
+          : { idleTimeoutMs: options.idleTimeoutSeconds * 1_000 }),
         maxCapturedBytes: this.config.maxCapturedBytes,
         registry: this.processes,
+        ...(signal === undefined ? {} : { signal }),
       });
     } finally {
       releaseMutation?.();

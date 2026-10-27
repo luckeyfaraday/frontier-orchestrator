@@ -3,9 +3,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { spawn } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { z } from "zod";
 import { loadRuntimeConfig, resolveWorkingDirectory, type RuntimeConfig } from "./config.js";
 import { SpecialistCoordinator } from "./coordinator.js";
+import { resolveSpawnTarget } from "./process.js";
 import {
   buildCodexInvocation,
   buildGrokInvocation,
@@ -13,6 +17,7 @@ import {
   type DelegationMode,
   type DelegationRequest,
   type Specialist,
+  type SpecialistInvocation,
 } from "./specialists.js";
 
 const ANSI_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
@@ -48,9 +53,11 @@ const delegationInput = {
     .number()
     .int()
     .min(30)
-    .max(3_600)
-    .default(1_200)
-    .describe("Hard timeout for the specialist CLI process."),
+    .max(7_200)
+    .default(3_600)
+    .describe(
+      "Hard limit on the specialist's total runtime. Keep the default; raise it toward 7200 for large implementations. Do not shorten it or split work to fit a time budget: Codex and Kimi are already stopped early when they produce no output for the server's idle limit (default 900 seconds), so a long limit costs nothing on a stuck run. Values up to the maximum are honored by the MCP client.",
+    ),
   allow_concurrent_mutation: z
     .boolean()
     .default(false)
@@ -88,7 +95,15 @@ function compactText(value: string, maximumCharacters: number): { text: string; 
 
 function commandVersion(command: string): Promise<{ available: boolean; version?: string; error?: string }> {
   return new Promise((resolve) => {
-    const child = spawn(command, ["--version"], {
+    let target: { command: string; args: string[] };
+    try {
+      target = resolveSpawnTarget(command, ["--version"]);
+    } catch (error) {
+      resolve({ available: false, error: error instanceof Error ? error.message : String(error) });
+      return;
+    }
+
+    const child = spawn(target.command, target.args, {
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -141,11 +156,33 @@ function buildRequest(args: DelegateArguments): DelegationRequest {
   };
 }
 
-function failureHint(specialist: Specialist, stdout: string, stderr: string): string | undefined {
-  const combined = `${stdout}\n${stderr}`;
+function stopHint(
+  result: { timedOut: boolean; idleTimedOut: boolean },
+  timeoutSeconds: number,
+  idleTimeoutSeconds: number,
+): string | undefined {
+  const resume =
+    "Edits made before the stop remain in the workspace, and final_message shows the last progress report. " +
+    "Inspect the changes, then delegate only the remaining work instead of restarting or splitting the original task further.";
 
-  if (specialist === "kimi-frontend" && /LLM not set|LLM is not set/i.test(combined)) {
-    return "Kimi has no configured model. Run `kimi login`, complete the provider/model setup, then retry.";
+  if (result.timedOut) {
+    return `The specialist was still working when timeout_seconds (${timeoutSeconds}) expired. ${resume} Give the follow-up a larger timeout_seconds.`;
+  }
+
+  if (result.idleTimedOut) {
+    return `The specialist produced no output for ${idleTimeoutSeconds} seconds and was stopped as stuck. ${resume} If it was blocked on a long silent command, ask it to run that command in the background or skip it.`;
+  }
+
+  return undefined;
+}
+
+// Scan only what the specialist reported, not the full stdout: Kimi's stdout is an event
+// stream that includes file contents, which would trigger false authentication hints.
+function failureHint(specialist: Specialist, finalMessage: string, stderr: string): string | undefined {
+  const combined = `${finalMessage}\n${stderr}`;
+
+  if (specialist === "kimi-frontend" && /LLM not set|LLM is not set|No model configured/i.test(combined)) {
+    return "Kimi has no configured model. Run `kimi login` or set default_model in the Kimi Code config.toml, then retry.";
   }
 
   if (/not logged in|authentication|unauthorized|401/i.test(combined)) {
@@ -167,11 +204,14 @@ async function delegate(
   args: DelegateArguments,
   config: RuntimeConfig,
   coordinator: SpecialistCoordinator,
+  signal: AbortSignal,
 ) {
+  let scratchDirectory: string | undefined;
+
   try {
     const workingDirectory = await resolveWorkingDirectory(args.working_directory, config);
     const request = buildRequest(args);
-    const invocation = (() => {
+    const invocation: SpecialistInvocation = await (async () => {
       switch (specialist) {
         case "codex-backend":
           return buildCodexInvocation(request, {
@@ -179,9 +219,11 @@ async function delegate(
             workingDirectory,
           });
         case "kimi-frontend":
+          scratchDirectory = await mkdtemp(path.join(tmpdir(), "frontier-kimi-"));
           return buildKimiInvocation(request, {
             cli: config.kimiCli,
             workingDirectory,
+            scratchDirectory,
           });
         case "grok-builder":
           return buildGrokInvocation(request, {
@@ -191,16 +233,45 @@ async function delegate(
       }
     })();
 
-    const result = await coordinator.run(
-      invocation,
-      args.timeout_seconds,
-      args.mode === "implement",
-      args.allow_concurrent_mutation,
-    );
-    const finalMessage = compactText(result.stdout, config.maxResultChars);
-    const diagnostics = compactText(result.stderr, Math.min(config.maxResultChars, 12_000));
-    const failed = result.exitCode !== 0 || result.timedOut;
-    const hint = failed ? failureHint(specialist, result.stdout, result.stderr) : undefined;
+    for (const file of invocation.files ?? []) {
+      await writeFile(file.path, file.content, "utf8");
+    }
+
+    const idleTimeoutSeconds =
+      invocation.reportsProgress === true && config.idleTimeoutSeconds > 0
+        ? config.idleTimeoutSeconds
+        : undefined;
+    const result = await coordinator.run(invocation, {
+      timeoutSeconds: args.timeout_seconds,
+      ...(idleTimeoutSeconds === undefined ? {} : { idleTimeoutSeconds }),
+      mutatesWorkspace: args.mode === "implement",
+      allowConcurrentMutation: args.allow_concurrent_mutation,
+      signal,
+    });
+    const extracted =
+      invocation.extractFinalMessage === undefined
+        ? result.stdout
+        : invocation.extractFinalMessage(result.stdout);
+    const failed =
+      result.exitCode !== 0 ||
+      result.timedOut ||
+      result.idleTimedOut ||
+      result.cancelled ||
+      extracted === undefined;
+    const finalMessage = compactText(extracted ?? "", config.maxResultChars);
+    const rawDiagnostics = [
+      result.stderr,
+      // Structured stdout is not returned as the final message, so keep it for debugging.
+      ...(invocation.extractFinalMessage === undefined ? [] : [result.stdout]),
+      ...(extracted === undefined ? ["Specialist exited without a final message."] : []),
+    ]
+      .filter((part) => part.trim() !== "")
+      .join("\n");
+    const diagnostics = compactText(rawDiagnostics, Math.min(config.maxResultChars, 12_000));
+    const hint = failed
+      ? stopHint(result, args.timeout_seconds, idleTimeoutSeconds ?? 0) ??
+        failureHint(specialist, extracted ?? "", result.stderr)
+      : undefined;
 
     const payload = {
       specialist,
@@ -209,6 +280,8 @@ async function delegate(
       exit_code: result.exitCode,
       signal: result.signal,
       timed_out: result.timedOut,
+      idle_timed_out: result.idleTimedOut,
+      cancelled: result.cancelled,
       duration_ms: result.durationMs,
       output_truncated: finalMessage.truncated || result.stdoutTruncated,
       final_message: finalMessage.text,
@@ -231,6 +304,10 @@ async function delegate(
       content: [{ type: "text" as const, text: `Delegation failed: ${message}` }],
       isError: true,
     };
+  } finally {
+    if (scratchDirectory !== undefined) {
+      await rm(scratchDirectory, { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 }
 
@@ -303,8 +380,8 @@ async function main(): Promise<void> {
         idempotentHint: false,
       },
     },
-    async (args) =>
-      await delegate("codex-backend", args as DelegateArguments, config, coordinator),
+    async (args, extra) =>
+      await delegate("codex-backend", args as DelegateArguments, config, coordinator, extra.signal),
   );
 
   server.registerTool(
@@ -320,8 +397,8 @@ async function main(): Promise<void> {
         idempotentHint: false,
       },
     },
-    async (args) =>
-      await delegate("kimi-frontend", args as DelegateArguments, config, coordinator),
+    async (args, extra) =>
+      await delegate("kimi-frontend", args as DelegateArguments, config, coordinator, extra.signal),
   );
 
   server.registerTool(
@@ -337,8 +414,8 @@ async function main(): Promise<void> {
         idempotentHint: false,
       },
     },
-    async (args) =>
-      await delegate("grok-builder", args as DelegateArguments, config, coordinator),
+    async (args, extra) =>
+      await delegate("grok-builder", args as DelegateArguments, config, coordinator, extra.signal),
   );
 
   const transport = new StdioServerTransport();
